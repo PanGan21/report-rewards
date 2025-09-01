@@ -484,7 +484,13 @@ async function getEligibleRounds(api, period, groupNs, blockHash) {
   }
 }
 
-async function getVotesForAddress(api, period, groupNs, address, blockHash) {
+async function getCorrectVotesForAddress(
+  api,
+  period,
+  groupNs,
+  address,
+  blockHash
+) {
   try {
     // Query the number of correct votes for the address in the specific period and group
     // Using VoteMetadata storage item: (groupNamespace, rewardPeriodIndex, operatorAccount) -> u32
@@ -897,7 +903,7 @@ async function main() {
     }
 
     try {
-      votes = await getVotesForAddress(
+      votes = await getCorrectVotesForAddress(
         api,
         REWARD_PERIOD_INDEX,
         GROUP_NAMESPACE,
