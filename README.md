@@ -111,7 +111,7 @@ The tool provides a comprehensive report including:
 ### Performance Analysis
 
 - Eligible voting rounds
-- Votes submitted
+- Correct Votes submitted
 - Vote ratio percentage
 - SLA compliance status
 
@@ -127,7 +127,7 @@ The tool provides a comprehensive report including:
 ```
 ------------------------------------------------------------
 Eligible Rounds: 87
-Votes Submitted: 61
+Correct Votes Submitted: 61
 SLA Threshold %: 60.00%
 Vote Ratio %: 70.11
 Meets SLA: ✅ YES

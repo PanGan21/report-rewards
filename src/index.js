@@ -1034,7 +1034,7 @@ async function main() {
       "Eligible Rounds:",
       eligibleRounds !== null ? eligibleRounds : "N/A"
     );
-    console.log("Votes Submitted:", votes !== null ? votes : "N/A");
+    console.log("Correct Votes Submitted:", votes !== null ? votes : "N/A");
     console.log(
       "SLA Threshold %:",
       slaPercentage !== null ? slaPercentage : "N/A"
