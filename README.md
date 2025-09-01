@@ -48,6 +48,7 @@ ADDRESS=5D2csUmBkLadib8ZM2guw28tXs2nMMAGS4K9RK9ApRdb6F6R
 # Optional Parameters
 NODE_URL=wss://public-rpc.mainnet.energywebx.com
 SPECIFIC_BLOCK_HASH=0xafe20ffbab4dea653cb2c8ac1230122ca6a43c4932f0fbd83214230ec3db1326
+INDEXER_URL=https://ewx-indexers.mainnet.energywebx.com/core/graphql
 ```
 
 ### Parameter Descriptions
@@ -59,6 +60,7 @@ SPECIFIC_BLOCK_HASH=0xafe20ffbab4dea653cb2c8ac1230122ca6a43c4932f0fbd83214230ec3
 | `ADDRESS`             | ✅       | The address to analyze (SS58 format)                                                            |
 | `NODE_URL`            | ❌       | RPC endpoint URL (defaults to mainnet)                                                          |
 | `SPECIFIC_BLOCK_HASH` | ❌       | Specific block hash to use (if not provided, tool will search for the reward calculation block) |
+| `INDEXER_URL`         | ❌       | GraphQL indexer URL for fast block discovery (recommended for production use)                   |
 
 ## Usage
 
@@ -78,6 +80,18 @@ REWARD_PERIOD_INDEX=578 GROUP_NAMESPACE=smartflow.v2 ADDRESS=5D2csUmBkLadib8ZM2g
 
 ```bash
 SPECIFIC_BLOCK_HASH=0xafe20ffbab4dea653cb2c8ac1230122ca6a43c4932f0fbd83214230ec3db1326 npm start
+```
+
+### With Indexer (Recommended for Production)
+
+```bash
+INDEXER_URL=https://ewx-indexers.mainnet.energywebx.com/core/graphql npm start
+```
+
+### With Both Indexer and Specific Block Hash
+
+```bash
+INDEXER_URL=https://ewx-indexers.mainnet.energywebx.com/core/graphql SPECIFIC_BLOCK_HASH=0xafe20ffbab4dea653cb2c8ac1230122ca6a43c4932f0fbd83214230ec3db1326 npm start
 ```
 
 ## Output
@@ -140,8 +154,23 @@ Period Rewards Earned:
 
 ### 2. Block Discovery
 
-- Finds the block where `RewardsCalculatedForPeriod` event was emitted
+The tool uses a three-priority system to find the block where `RewardsCalculatedForPeriod` event was emitted:
+
+**Priority 1: SPECIFIC_BLOCK_HASH** (if provided)
+
+- Uses the provided block hash directly after verification
+
+**Priority 2: INDEXER_URL** (if provided)
+
+- Queries the GraphQL indexer for `WorkerNodePallet.RewardsCalculatedForPeriod` events
+- Finds the event that occurs after the start of the next period (period 614 + 1 = period 615)
+- **Fast and efficient** - finds the correct block in seconds
+
+**Priority 3: Blockchain Search** (fallback)
+
 - Uses optimized search algorithm that counts `SystemVotingRounds` from previous periods
+- **Slower but reliable** - scans blockchain blocks sequentially
+
 - Locates the initial state block (before any `EarnedRewardCalculated` events)
 
 ### 3. Historical State Analysis
@@ -167,9 +196,17 @@ Period Rewards Earned:
 The tool analyzes blockchain data by:
 
 1. **Querying Storage Items** - Accesses various pallet storage items to gather period, subscription, and reward information
-2. **Event Monitoring** - Searches for specific blockchain events that indicate when rewards were calculated
+2. **Event Monitoring** - Uses three-priority system to find `RewardsCalculatedForPeriod` events:
+   - **Indexer Query**: Fast GraphQL queries to external indexer
+   - **Blockchain Search**: Direct blockchain scanning as fallback
 3. **Historical State Analysis** - Compares blockchain state before and after reward distribution
 4. **Performance Calculation** - Computes voting statistics and SLA compliance metrics
+
+## Performance Considerations
+
+- **With INDEXER_URL**: ⚡ **Fast** (~5-10 seconds) - Recommended for production use
+- **Without INDEXER_URL**: 🐌 **Slow** (could take hours) - Only for development/testing
+- **With SPECIFIC_BLOCK_HASH**: ⚡ **Instant** - When you know the exact block
 
 ## License
 

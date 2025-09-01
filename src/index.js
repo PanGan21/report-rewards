@@ -209,7 +209,7 @@ async function findBlockForPeriod(api, periodIndex) {
 
   // Count SystemVotingRounds in the previous period to determine minimum processing time
   const previousPeriodIndex = periodIndex - 1;
-  let optimizedStartBlock = nextPeriodStartBlock;
+  let startBlock = nextPeriodStartBlock;
 
   if (previousPeriodIndex >= 0) {
     try {
@@ -653,6 +653,96 @@ async function getAllGroupsSystemVotingRoundsCount(
   }
 }
 
+/// Helper to query the indexer for rewards calculation block
+async function queryIndexerForRewardsBlock(indexerUrl, periodIndex, api) {
+  try {
+    const query = {
+      query: `query { 
+        events(
+          where: {
+            name_eq: "WorkerNodePallet.RewardsCalculatedForPeriod"
+          }, 
+          orderBy: blockNumber_DESC
+        ) { 
+          name 
+          blockNumber 
+        } 
+      }`,
+    };
+
+    const response = await fetch(indexerUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(query),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.errors) {
+      throw new Error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
+    }
+
+    if (!data.data || !data.data.events || data.data.events.length === 0) {
+      return null;
+    }
+
+    // Get the period info to determine the block range
+    const activeRewardPeriodInfo =
+      await api.query.workerNodePallet.activeRewardPeriodInfo();
+    const currentPeriod = activeRewardPeriodInfo.toJSON();
+
+    // Calculate the period boundaries for the requested period and the next period
+    const periodLength = currentPeriod.length;
+    const periodStartBlock =
+      currentPeriod.firstBlock -
+      (currentPeriod.index - periodIndex) * periodLength;
+    const periodEndBlock = periodStartBlock + periodLength - 1;
+
+    // Calculate the start block of the next period (period 614 + 1 = period 615)
+    const nextPeriodStartBlock = periodStartBlock + periodLength;
+
+    console.log(
+      `Period ${periodIndex} block range: ${periodStartBlock} to ${periodEndBlock}`
+    );
+    console.log(
+      `Next period ${periodIndex + 1} starts at block: ${nextPeriodStartBlock}`
+    );
+
+    // We need to find the RewardsCalculatedForPeriod event that happens AFTER the next period starts
+    // This means the event should be after nextPeriodStartBlock
+    const searchStartBlock = nextPeriodStartBlock; // Event must be after next period starts
+    const searchEndBlock = searchStartBlock + 2000; // Search up to 2000 blocks after
+
+    console.log(
+      `Searching for RewardsCalculatedForPeriod event after next period starts: blocks ${searchStartBlock} to ${searchEndBlock}`
+    );
+
+    // Find the event that falls within the search range (after next period starts)
+    for (const event of data.data.events) {
+      const blockNumber = event.blockNumber;
+      if (blockNumber >= searchStartBlock && blockNumber <= searchEndBlock) {
+        console.log(
+          `✅ Found RewardsCalculatedForPeriod event for period ${periodIndex} at block ${blockNumber} (after next period starts)`
+        );
+        return blockNumber;
+      }
+    }
+
+    console.log(
+      `No RewardsCalculatedForPeriod event found within period ${periodIndex} block range`
+    );
+    return null;
+  } catch (error) {
+    throw new Error(`Indexer query failed: ${error.message}`);
+  }
+}
+
 /// Main workflow
 async function main() {
   const provider = new WsProvider(NODE_URL);
@@ -706,7 +796,50 @@ async function main() {
           `Failed to verify RewardsCalculatedForPeriod event in provided block ${SPECIFIC_BLOCK_HASH}: ${error.message}`
         );
       }
+    } else if (process.env.INDEXER_URL) {
+      // Priority 2: Query the indexer for the block number
+      console.log(
+        `\nQuerying indexer at ${process.env.INDEXER_URL} for RewardsCalculatedForPeriod event...`
+      );
+
+      try {
+        const indexerBlockNumber = await queryIndexerForRewardsBlock(
+          process.env.INDEXER_URL,
+          REWARD_PERIOD_INDEX,
+          api
+        );
+
+        if (indexerBlockNumber) {
+          console.log(
+            `✅ Found block number ${indexerBlockNumber} from indexer within period ${REWARD_PERIOD_INDEX} range`
+          );
+
+          // Use the block directly from the indexer
+          blockHash = await api.rpc.chain.getBlockHash(indexerBlockNumber);
+          console.log(`✅ Using block hash from indexer: ${blockHash}`);
+        } else {
+          throw new Error(
+            "Indexer query returned no results within the period range"
+          );
+        }
+      } catch (error) {
+        console.log(
+          `⚠️  Indexer query failed: ${error.message}, falling back to blockchain search`
+        );
+        console.log(
+          `\nSearching for RewardsCalculatedForPeriod event for period ${REWARD_PERIOD_INDEX}...`
+        );
+        console.log(
+          "🔍 Using optimized search method (counts SystemVotingRounds in previous period)"
+        );
+        blockHash = await findBlockForPeriod(api, REWARD_PERIOD_INDEX);
+        console.log(
+          `Found block for period ${REWARD_PERIOD_INDEX}:`,
+          blockHash
+        );
+      }
     } else {
+      // Priority 3: Fallback to blockchain search
       console.log(
         `\nSearching for RewardsCalculatedForPeriod event for period ${REWARD_PERIOD_INDEX}...`
       );
