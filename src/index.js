@@ -9,10 +9,160 @@ import {
   SPECIFIC_BLOCK_HASH,
 } from "./constants.js";
 
-// -----------------------------
-// Helpers (placeholders for real queries)
-// -----------------------------
+/// Validation
+async function validateInput(api) {
+  console.log("🔍 Validating input parameters...");
 
+  // Check for undefined or invalid required parameters
+  if (
+    REWARD_PERIOD_INDEX === undefined ||
+    REWARD_PERIOD_INDEX === null ||
+    isNaN(REWARD_PERIOD_INDEX) ||
+    REWARD_PERIOD_INDEX <= 0
+  ) {
+    throw new Error(
+      "REWARD_PERIOD_INDEX is required and must be a positive number, but got: " +
+        REWARD_PERIOD_INDEX
+    );
+  }
+
+  if (
+    !GROUP_NAMESPACE ||
+    typeof GROUP_NAMESPACE !== "string" ||
+    GROUP_NAMESPACE.trim() === ""
+  ) {
+    throw new Error(
+      "GROUP_NAMESPACE is required and must be a non-empty string, but got: " +
+        GROUP_NAMESPACE
+    );
+  }
+
+  if (!ADDRESS || typeof ADDRESS !== "string" || ADDRESS.trim() === "") {
+    throw new Error(
+      "ADDRESS is required and must be a non-empty string, but got: " + ADDRESS
+    );
+  }
+
+  console.log("✅ All required parameters are defined");
+  console.log(`   REWARD_PERIOD_INDEX: ${REWARD_PERIOD_INDEX}`);
+  console.log(`   GROUP_NAMESPACE: ${GROUP_NAMESPACE}`);
+  console.log(`   ADDRESS: ${ADDRESS}`);
+
+  // Check if ADDRESS was subscribed for REWARD_PERIOD_INDEX to GROUP_NAMESPACE
+  console.log("🔍 Checking subscription status...");
+
+  try {
+    // Get the current active reward period info to determine the block for the requested period
+    const activeRewardPeriodInfo =
+      await api.query.workerNodePallet.activeRewardPeriodInfo();
+    const currentPeriod = activeRewardPeriodInfo.toJSON();
+
+    // Calculate the block number for the requested period
+    const periodsBack = currentPeriod.index - REWARD_PERIOD_INDEX;
+    const periodStartBlock =
+      currentPeriod.firstBlock - periodsBack * currentPeriod.length;
+
+    // Get the block hash for the start of the requested period
+    const periodBlockHash = await api.rpc.chain.getBlockHash(periodStartBlock);
+
+    console.log(
+      `   Querying stake record at block ${periodStartBlock} (${periodBlockHash})`
+    );
+
+    // Query the SolutionGroupStakeRecords storage item
+    // StorageDoubleMap: (SolutionGroupNamespace, AccountId) -> StakeRecord
+    const stakeRecord =
+      await api.query.workerNodePallet.solutionGroupStakeRecords.at(
+        periodBlockHash,
+        GROUP_NAMESPACE,
+        ADDRESS
+      );
+
+    if (stakeRecord.isNone) {
+      throw new Error(
+        `Address ${ADDRESS} was not subscribed to group ${GROUP_NAMESPACE} in period ${REWARD_PERIOD_INDEX}`
+      );
+    }
+
+    // Decode the stake record to check the stake for the specific period
+    const stakeRecordData = stakeRecord.unwrap();
+
+    // The StakeRecord is a BoundedBTreeMap<RewardPeriodIndex, Stake>
+    // The key represents the LAST UPDATE period, and the value is the current stake amount
+    // This stake amount applies to all periods from the last update onwards
+    let hasValidStake = false;
+    let stakeValue = new BN(0);
+    let lastUpdatePeriod = 0;
+
+    try {
+      // Parse the human-readable format of the stake record
+      const stakeRecordHuman = stakeRecordData.toHuman();
+
+      if (stakeRecordHuman && typeof stakeRecordHuman === "object") {
+        // Find the highest period (most recent update) in the stake record
+        for (const [period, stake] of Object.entries(stakeRecordHuman)) {
+          const periodNum = parseInt(period);
+          if (periodNum > lastUpdatePeriod) {
+            lastUpdatePeriod = periodNum;
+
+            // Parse the stake value using BN for large numbers
+            if (typeof stake === "string" && stake.startsWith("0x")) {
+              stakeValue = new BN(stake, 16);
+            } else {
+              stakeValue = new BN(stake.toString().replace(/,/g, "")); // Remove commas and parse
+            }
+          }
+        }
+
+        // Check if the requested period is >= the last update period
+        // and if the stake amount is > 0
+        if (
+          REWARD_PERIOD_INDEX >= lastUpdatePeriod &&
+          stakeValue.gt(new BN(0))
+        ) {
+          hasValidStake = true;
+          console.log(
+            `   Last stake update was in period ${lastUpdatePeriod}, current stake: ${stakeValue.toString()}`
+          );
+          console.log(
+            `   Requested period ${REWARD_PERIOD_INDEX} is >= last update period, subscription is valid`
+          );
+        } else {
+          console.log(
+            `   Last stake update was in period ${lastUpdatePeriod}, current stake: ${stakeValue.toString()}`
+          );
+          console.log(
+            `   Requested period ${REWARD_PERIOD_INDEX} is < last update period or stake is 0, subscription is invalid`
+          );
+        }
+      }
+    } catch (parseError) {
+      console.log(`   Error parsing stake record: ${parseError.message}`);
+      // If we can't parse it, assume no valid stake
+      hasValidStake = false;
+    }
+
+    if (!hasValidStake) {
+      throw new Error(
+        `Address ${ADDRESS} was not subscribed to group ${GROUP_NAMESPACE} in period ${REWARD_PERIOD_INDEX} ` +
+          `(stake: ${stakeValue.toString()})`
+      );
+    }
+
+    console.log(
+      `   ✅ Address was subscribed with stake: ${stakeValue.toString()}`
+    );
+  } catch (error) {
+    if (error.message.includes("was not subscribed")) {
+      throw error; // Re-throw subscription validation errors
+    }
+    throw new Error(`Failed to validate subscription: ${error.message}`);
+  }
+
+  console.log("✅ Input validation completed");
+}
+
+/// Helper to find the required blocks for a period
 async function findBlockForPeriod(api, periodIndex) {
   // Step 1: Get the current active reward period info
   const activeRewardPeriodInfo =
@@ -114,7 +264,7 @@ async function findBlockForPeriod(api, periodIndex) {
         startBlock = nextPeriodStartBlock;
       }
     } catch (error) {
-      throw new `⚠️  Start block search failed: ${error.message}`();
+      throw new Error(`⚠️  Start block search failed: ${error.message}`);
     }
   }
 
@@ -495,9 +645,7 @@ async function getAllGroupsSystemVotingRoundsCount(
   }
 }
 
-// -----------------------------
-// Main workflow
-// -----------------------------
+/// Main workflow
 async function main() {
   const provider = new WsProvider(NODE_URL);
   const api = await ApiPromise.create({
@@ -509,6 +657,9 @@ async function main() {
     console.log(`Connecting to ${NODE_URL}...`);
     await api.isReady;
     console.log("Connected to Energy Web X parachain");
+
+    // Validate input parameters
+    await validateInput(api);
 
     // Step 1: find block where rewards for the period were calculated
     let blockHash;
@@ -681,38 +832,14 @@ async function main() {
     let periodRewards = null;
     if (initialRewards !== null && finalRewards !== null) {
       // Handle BN tuple values properly for subtraction
-      if (
-        Array.isArray(initialRewards) &&
-        Array.isArray(finalRewards) &&
-        initialRewards.length >= 2 &&
-        finalRewards.length >= 2
-      ) {
-        // Both are BN tuples [subscriptionRewards, votingRewards]
-        const subscriptionPeriodRewards = finalRewards[0].sub(
-          initialRewards[0]
-        );
-        const votingPeriodRewards = finalRewards[1].sub(initialRewards[1]);
-        periodRewards = [subscriptionPeriodRewards, votingPeriodRewards];
+      // Both are BN tuples [subscriptionRewards, votingRewards]
+      const subscriptionPeriodRewards = finalRewards[0].sub(initialRewards[0]);
+      const votingPeriodRewards = finalRewards[1].sub(initialRewards[1]);
+      periodRewards = [subscriptionPeriodRewards, votingPeriodRewards];
 
-        console.log(
-          `✅ Calculated period rewards - Subscription: ${subscriptionPeriodRewards}, Voting: ${votingPeriodRewards}`
-        );
-      } else if (
-        typeof initialRewards.sub === "function" &&
-        typeof finalRewards.sub === "function"
-      ) {
-        // Both are single BN values
-        periodRewards = finalRewards.sub(initialRewards);
-        console.log(
-          `✅ Calculated period rewards: ${periodRewards.toString()} (${finalRewards.toString()} - ${initialRewards.toString()})`
-        );
-      } else {
-        // Fallback to regular subtraction
-        periodRewards = finalRewards - initialRewards;
-        console.log(
-          `✅ Calculated period rewards: ${periodRewards} (${finalRewards} - ${initialRewards})`
-        );
-      }
+      console.log(
+        `✅ Calculated period rewards - Subscription: ${subscriptionPeriodRewards}, Voting: ${votingPeriodRewards}`
+      );
     }
 
     // Step 4: derive SLA check
@@ -722,10 +849,7 @@ async function main() {
       voteRatio = (votes / eligibleRounds) * 100;
 
       // Convert slaPercentage from string (e.g., "60.00%") to number
-      let slaThresholdNumber = slaPercentage;
-      if (typeof slaPercentage === "string") {
-        slaThresholdNumber = parseFloat(slaPercentage.replace("%", ""));
-      }
+      let slaThresholdNumber = parseFloat(slaPercentage.replace("%", ""));
 
       meetsSla = voteRatio >= slaThresholdNumber;
 
