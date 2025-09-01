@@ -111,20 +111,6 @@ The tool provides a comprehensive report including:
 ### Example Output
 
 ```
-============================================================
-REWARD PERIOD ANALYSIS REPORT
-============================================================
-Reward Period Index: 614
-Group Namespace: smartflow.v2
-Address: 5D2csUmBkLadib8ZM2guw28tXs2nMMAGS4K9RK9ApRdb6F6R
-------------------------------------------------------------
-Period Info: {
-  "index": 614,
-  "start": 4766246,
-  "end": 4773445,
-  "length": 7200,
-  "firstBlock": 4766246
-}
 ------------------------------------------------------------
 Eligible Rounds: 49
 Votes Submitted: 61
