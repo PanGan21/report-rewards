@@ -112,10 +112,10 @@ The tool provides a comprehensive report including:
 
 ```
 ------------------------------------------------------------
-Eligible Rounds: 49
+Eligible Rounds: 87
 Votes Submitted: 61
 SLA Threshold %: 60.00%
-Vote Ratio %: 124.49
+Vote Ratio %: 70.11
 Meets SLA: ✅ YES
 ------------------------------------------------------------
 Initial Rewards:

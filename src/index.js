@@ -422,9 +422,10 @@ async function getEligibleRounds(api, period, groupNs, blockHash) {
           [ADDRESS, groupNs] // Tuple of (OperatorAccount, SolutionGroupNamespace)
         );
     } catch (error) {
-      throw Error(
+      console.debug(
         `numberOfOperatorVotingsWithNomination query failed: ${error.message}`
       );
+      numberOfOperatorVotingsWithNomination = null;
     }
 
     // Check if data exists and decode it
@@ -442,17 +443,24 @@ async function getEligibleRounds(api, period, groupNs, blockHash) {
     // numberOfOperatorVotingsWithNomination might not exist, so we'll handle it gracefully
     let operatorVotingsWithNomination = 0;
     try {
-      if (numberOfOperatorVotingsWithNomination.isNone !== undefined) {
-        if (!numberOfOperatorVotingsWithNomination.isNone) {
-          operatorVotingsWithNomination = numberOfOperatorVotingsWithNomination
-            .unwrap()
-            .toNumber();
+      if (numberOfOperatorVotingsWithNomination) {
+        // Check if it's an Option type
+        if (numberOfOperatorVotingsWithNomination.isNone !== undefined) {
+          if (!numberOfOperatorVotingsWithNomination.isNone) {
+            operatorVotingsWithNomination =
+              numberOfOperatorVotingsWithNomination.unwrap().toNumber();
+          }
+        } else {
+          // It's a direct value (like BN)
+          operatorVotingsWithNomination =
+            numberOfOperatorVotingsWithNomination.toNumber();
         }
       }
     } catch (error) {
-      throw new Error(
-        `numberOfOperatorVotingsWithNomination not available: ${error.message}`
+      console.debug(
+        `numberOfOperatorVotingsWithNomination not available, using 0: ${error.message}`
       );
+      operatorVotingsWithNomination = 0;
     }
 
     // Decode the storage data using standard methods
